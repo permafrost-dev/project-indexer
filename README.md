@@ -2,16 +2,19 @@
 
 ---
 
-
-
 check if a project has any changed source files
+
+## Usage
+
+- `project-indexer index <path>` - index a project's source files and write the index to a file
+- `project-indexer check <path>` - check if a project has any changed source files, must have been indexed with `index` first
+- `project-indexer has-changes <path>` - check if a project has any changed source files; exit code 0 if there are no changes, 1 if there are changes
 
 ## Setup
 
 ```bash
 go mod tidy
 ```
-
 
 ## Building the project
 
