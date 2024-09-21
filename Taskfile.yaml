@@ -67,7 +67,6 @@ tasks:
     sources:
       - './app/**/*.go'
       - './cmd/**/*.go'
-      - './internal/**/*.go'
       - './main.go'
     generates:
       - ./dist/project-indexer
