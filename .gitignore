@@ -2,6 +2,8 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=go,goland,visualstudiocode,dotenv,git
 
 project-indexer
+*.idx
+*.idx.json
 
 ### dotenv ###
 .env

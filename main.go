@@ -10,7 +10,20 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	flags "github.com/jessevdk/go-flags"
 )
+
+var opts struct {
+	Help     bool   `short:"h" long:"help" description:"Show this help message"`
+	Filename string `short:"f" long:"filename" description:"Index filename to read and write"`
+
+	Ignored []string `short:"i" long:"ignore" description:"Ignore files matching the given pattern" required:"no"`
+
+	Args struct {
+		Paths []string
+	} `positional-args:"yes" required:"yes"`
+}
 
 type ChangedFiles struct {
 	Added    []string
@@ -62,7 +75,10 @@ func (fi *FileIndex) Filename(path string) string {
 }
 
 func (fi *FileIndex) WriteIndexFile(path string) error {
-	indexFilePath := fi.Filename(path)
+	indexFilePath := path //fi.Filename(path)
+	if !strings.HasSuffix(indexFilePath, ".idx") {
+		indexFilePath = filepath.Join(path, ".project-indexer.idx")
+	}
 	f, err := os.Create(indexFilePath)
 	if err != nil {
 		return err
@@ -83,36 +99,121 @@ func main() {
 
 	cmd := os.Args[1]
 
+	if len(os.Args) < 3 {
+		if len(os.Args) < 2 {
+			cmd = "<command>"
+		}
+
+		fmt.Printf("Usage: %s %s <path1, path2, ...> [-f <filename>]\n", os.Args[0], cmd)
+		os.Exit(1)
+	}
+
+	flags.ParseArgs(&opts, os.Args[2:])
+
+	if len(opts.Filename) == 0 {
+		opts.Filename = ".project-indexer.idx"
+	}
+
 	switch cmd {
 	case "index":
-		if len(os.Args) != 3 {
-			fmt.Println("Usage: project-indexer index <directory>")
+		index := NewIndexInformation()
+		hasError := false
+		for _, directory := range opts.Args.Paths {
+			idx, err := indexDirectory(directory)
+			if err != nil {
+				fmt.Println("Error indexing directory:", err)
+				hasError = true
+			}
+
+			for fn, hash := range idx.Index {
+				index.Add(fn, hash)
+			}
+		}
+
+		index.WriteIndexFile(opts.Filename)
+
+		fmt.Printf("Indexed %d files\n", index.Size())
+		fmt.Printf("Index written to %s\n", opts.Filename)
+
+		if hasError {
 			os.Exit(1)
 		}
-		directory := os.Args[2]
-		_, err := indexDirectory(directory)
-		if err != nil {
-			fmt.Println("Error indexing directory:", err)
-			os.Exit(1)
-		}
+
+		os.Exit(0)
 	case "check":
-		if len(os.Args) != 3 {
+		if len(os.Args) < 3 {
 			fmt.Println("Usage: project-indexer check <directory>")
 			os.Exit(1)
 		}
-		directory := os.Args[2]
-		_, err := checkDirectory(directory)
-		if err != nil {
-			fmt.Println("Error checking directory:", err)
+		result := NewChangedFiles()
+
+		currentFullIndex := make(map[string]string)
+		storedFullIndex := make(map[string]string)
+
+		for _, path := range opts.Args.Paths {
+			currentIndex, storedIndex, err := checkDirectory(opts.Filename, path)
+			if err != nil {
+				fmt.Println("Error checking directory:", err)
+				os.Exit(1)
+			}
+
+			for path, currentHash := range currentIndex {
+				currentFullIndex[path] = currentHash
+			}
+
+			storedFullIndex = storedIndex
+		}
+
+		for path, currentHash := range currentFullIndex {
+			if storedHash, ok := storedFullIndex[path]; ok {
+				if currentHash != storedHash {
+					result.Modified = append(result.Modified, path)
+				}
+			} else {
+				result.Added = append(result.Added, path)
+			}
+		}
+
+		for path, _ := range storedFullIndex {
+			if _, ok := currentFullIndex[path]; !ok {
+				result.Removed = append(result.Removed, path)
+			}
+		}
+
+		if result.HasChanges() {
+			if len(result.Added) > 0 {
+				fmt.Println("Added files:")
+				for _, f := range result.Added {
+					fmt.Println("  ", f)
+				}
+			}
+
+			if len(result.Modified) > 0 {
+				fmt.Println("Modified files:")
+				for _, f := range result.Modified {
+					fmt.Println("  ", f)
+				}
+			}
+
+			if len(result.Removed) > 0 {
+				fmt.Println("Removed files:")
+				for _, f := range result.Removed {
+					fmt.Println("  ", f)
+				}
+			}
+
 			os.Exit(1)
 		}
+
+		fmt.Println("No changes detected.")
+		os.Exit(0)
 	case "has-changes":
 		if len(os.Args) != 3 {
 			fmt.Println("Usage: project-indexer has-changes <directory>")
 			os.Exit(1)
 		}
-		directory := os.Args[2]
-		hasChanges, err := hasChanges(directory)
+
+		hasChanges, err := hasChanges(opts.Filename, opts.Args.Paths)
 
 		if err != nil {
 			fmt.Println("Error checking directory:", err)
@@ -131,16 +232,43 @@ func main() {
 	}
 }
 
-func hasChanges(dir string) (bool, error) {
-	changes, err := checkDirectory(dir)
-	if err != nil {
-		return false, err
+func hasChanges(indexFilePath string, paths []string) (bool, error) {
+	// for _, path := range paths {
+	// 	changes, err := checkDirectory(indexFilePath, path)
+	// 	if err != nil {
+	// 		return false, err
+	// 	}
+
+	// 	if changes.HasChanges() {
+	// 		return true, nil
+	// 	}
+	// }
+
+	return false, nil
+}
+
+func FindProjectRoot(dir string) string {
+	originalDir := dir
+	//find the root of the project by locating the dir with a .git/node_modules folder:
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		if _, err := os.Stat(filepath.Join(dir, "node_modules")); err == nil {
+			return dir
+		}
+		if dir == "/" {
+			result := filepath.Dir(originalDir)
+			return result
+		}
+		dir = filepath.Dir(dir)
 	}
-	return changes.HasChanges(), nil
 }
 
 func indexDirectory(dir string) (*FileIndex, error) {
 	result := NewIndexInformation()
+	projectDir := FindProjectRoot(dir)
+
 	index := make(map[string]string)
 	counter := 0
 
@@ -150,16 +278,16 @@ func indexDirectory(dir string) (*FileIndex, error) {
 		}
 
 		if !d.IsDir() {
-			relPath, err := filepath.Rel(dir, path)
+			relPath, err := filepath.Rel(projectDir, path)
 			if err != nil {
 				return err
 			}
 
-			if relPath == ".project-indexer.idx" {
+			if relPath == ".project-indexer.idx" || strings.HasSuffix(relPath, ".idx") {
 				return nil // Skip the index file itself
 			}
 
-			if strings.HasSuffix(relPath, ".git") {
+			if strings.HasSuffix(dir, ".git") {
 				return nil
 			}
 
@@ -191,7 +319,7 @@ func indexDirectory(dir string) (*FileIndex, error) {
 		return nil, err
 	}
 
-	result.WriteIndexFile(dir)
+	// result.WriteIndexFile(dir)
 
 	// indexFilePath := filepath.Join(dir, ".project-indexer.idx")
 	// f, err := os.Create(indexFilePath)
@@ -206,18 +334,18 @@ func indexDirectory(dir string) (*FileIndex, error) {
 	// 	return nil, err
 	// }
 
-	fmt.Printf("Indexed %d files\n", result.Size())
-	fmt.Println("Index created at", result.Filename(dir))
+	// fmt.Printf("Indexed %d files\n", result.Size())
+	// fmt.Println("Index created at", result.Filename(dir))
 
 	return result, nil
 }
 
-func checkDirectory(dir string) (*ChangedFiles, error) {
-	result := NewChangedFiles()
-	indexFilePath := filepath.Join(dir, ".project-indexer.idx")
+func checkDirectory(indexFilePath string, dir string) (map[string]string, map[string]string, error) {
+	//result := NewChangedFiles()
+	projectDir := FindProjectRoot(dir)
 	f, err := os.Open(indexFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("could not open index file: %v", err)
+		return nil, nil, fmt.Errorf("could not open index file: %v", err)
 	}
 	defer f.Close()
 
@@ -225,7 +353,7 @@ func checkDirectory(dir string) (*ChangedFiles, error) {
 	decoder := json.NewDecoder(f)
 	err = decoder.Decode(&storedIndex)
 	if err != nil {
-		return nil, fmt.Errorf("could not decode index file: %v", err)
+		return nil, nil, fmt.Errorf("could not decode index file: %v", err)
 	}
 
 	currentIndex := make(map[string]string)
@@ -236,16 +364,16 @@ func checkDirectory(dir string) (*ChangedFiles, error) {
 		}
 
 		if !d.IsDir() {
-			relPath, err := filepath.Rel(dir, path)
+			relPath, err := filepath.Rel(projectDir, path)
 			if err != nil {
 				return err
 			}
 
-			if relPath == ".project-indexer.idx" {
+			if relPath == ".project-indexer.idx" || strings.HasSuffix(relPath, ".idx") {
 				return nil // Skip the index file itself
 			}
 
-			if strings.HasSuffix(relPath, ".git") {
+			if strings.HasSuffix(dir, ".git") {
 				return nil
 			}
 
@@ -272,53 +400,63 @@ func checkDirectory(dir string) (*ChangedFiles, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	return currentIndex, storedIndex, nil
+
+	// fmt.Printf("stored index: %v\n", storedIndex)
 	// Check for added or modified files
-	for path, currentHash := range currentIndex {
-		if storedHash, ok := storedIndex[path]; ok {
-			if currentHash != storedHash {
-				result.Modified = append(result.Modified, path)
-			}
-		} else {
-			result.Added = append(result.Added, path)
-		}
-	}
+	// for path, currentHash := range currentIndex {
+	// 	if storedHash, ok := storedIndex[path]; ok {
+	// 		if currentHash != storedHash {
+	// 			result.Modified = append(result.Modified, path)
+	// 		}
+	// 	} else {
+	// 		result.Added = append(result.Added, path)
+	// 	}
+	// }
+
+	// // check for items in storedIndex that are not in currentIndex
+
+	// for path, _ := range storedIndex {
+	// 	if _, ok := currentIndex[path]; !ok {
+	// 		result.Removed = append(result.Removed, path)
+	// 	}
+	// }
 
 	// Check for removed files
-	for path := range storedIndex {
-		if _, ok := currentIndex[path]; !ok {
-			result.Removed = append(result.Removed, path)
-		}
-	}
+	// for path, _ := range storedIndex {
+	// 	if currentPath, ok := currentIndex[path]; !ok {
+	// 		fmt.Printf("stored/current path: %v, %v\n", path, currentPath)
+	// 		result.Removed = append(result.Removed, path)
+	// 	}
+	// }
 
-	if result.IsEmpty() {
-		fmt.Println("No changes detected.")
-	}
+	// if result.IsEmpty() {
+	// 	fmt.Println("No changes detected.")
+	// }
 
-	if result.HasChanges() {
-		if len(result.Added) > 0 {
-			fmt.Println("Added files:")
-			for _, f := range result.Added {
-				fmt.Println("  ", f)
-			}
-		}
-		if len(result.Modified) > 0 {
-			fmt.Println("Modified files:")
-			for _, f := range result.Modified {
-				fmt.Println("  ", f)
-			}
-		}
-		if len(result.Removed) > 0 {
-			fmt.Println("Removed files:")
-			for _, f := range result.Removed {
-				fmt.Println("  ", f)
-			}
-		}
-	}
-
-	return result, nil
+	// if result.HasChanges() {
+	// 	if len(result.Added) > 0 {
+	// 		fmt.Println("Added files:")
+	// 		for _, f := range result.Added {
+	// 			fmt.Println("  ", f)
+	// 		}
+	// 	}
+	// 	if len(result.Modified) > 0 {
+	// 		fmt.Println("Modified files:")
+	// 		for _, f := range result.Modified {
+	// 			fmt.Println("  ", f)
+	// 		}
+	// 	}
+	// 	if len(result.Removed) > 0 {
+	// 		fmt.Println("Removed files:")
+	// 		for _, f := range result.Removed {
+	// 			fmt.Println("  ", f)
+	// 		}
+	// 	}
+	// }
 }
 
 func computeFileHash(filePath string) (string, error) {
