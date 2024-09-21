@@ -20,7 +20,7 @@ archives:
 
 builds:
   - main: './main.go'
-    binary: '{{project.name}}'
+    binary: 'project-indexer'
     mod_timestamp: '{{ .CommitTimestamp }}'
     flags:
       - -trimpath
@@ -30,15 +30,16 @@ builds:
       - linux_amd64
       - darwin_arm64
       - darwin_amd64
+      - windows_amd64
 
 # brews:
-    # - name: '{{project.name}}'
-    #   homepage: 'https://github.com/{{project.vendor.github}}/{{project.name}}'
-    #   description: '{{project.description}}'
+    # - name: 'project-indexer'
+    #   homepage: 'https://github.com/permafrost-dev/project-indexer'
+    #   description: 'check if a project has any changed source files'
     #   license: "MIT"
     #     repository:
-    #       owner: '{{project.vendor.github}}'
-    #       name: homebrew-{{project.name}}
+    #       owner: 'permafrost-dev'
+    #       name: homebrew-project-indexer
     #       branch: main
 
 checksum:
