@@ -93,7 +93,7 @@ func (fi *FileIndex) WriteIndexFile(path string) error {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: project-indexer [index|check] <directory>")
+		fmt.Printf("Usage: %s %s <path1, path2, ...> [-f <filename>]\n", os.Args[0], "[index|check]")
 		os.Exit(1)
 	}
 
