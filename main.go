@@ -207,44 +207,11 @@ func main() {
 
 		fmt.Println("No changes detected.")
 		os.Exit(0)
-	case "has-changes":
-		if len(os.Args) != 3 {
-			fmt.Println("Usage: project-indexer has-changes <directory>")
-			os.Exit(1)
-		}
-
-		hasChanges, err := hasChanges(opts.Filename, opts.Args.Paths)
-
-		if err != nil {
-			fmt.Println("Error checking directory:", err)
-			os.Exit(1)
-		}
-
-		if hasChanges {
-			os.Exit(1)
-		}
-
-		os.Exit(0)
 	default:
 		fmt.Println("Unknown command:", cmd)
 		fmt.Println("Usage: project-indexer [index|check] <directory>")
 		os.Exit(1)
 	}
-}
-
-func hasChanges(indexFilePath string, paths []string) (bool, error) {
-	// for _, path := range paths {
-	// 	changes, err := checkDirectory(indexFilePath, path)
-	// 	if err != nil {
-	// 		return false, err
-	// 	}
-
-	// 	if changes.HasChanges() {
-	// 		return true, nil
-	// 	}
-	// }
-
-	return false, nil
 }
 
 func FindProjectRoot(dir string) string {
@@ -298,7 +265,7 @@ func indexDirectory(dir string) (*FileIndex, error) {
 			}
 
 			// only hash certain file types
-			matched, err = regexp.MatchString(`.+\.(ts|js|tsx|jsx|mjs|cjs|mts|json|css|sass|scss|png|svg|jpg|gql)$`, relPath)
+			matched, err = regexp.MatchString(`.+\.(php|ts|js|tsx|jsx|mjs|cjs|mts|json|css|sass|scss|png|svg|jpg|gql)$`, relPath)
 			if !matched || err != nil {
 				return nil
 			}
@@ -384,7 +351,7 @@ func checkDirectory(indexFilePath string, dir string) (map[string]string, map[st
 			}
 
 			// only hash certain file types
-			matched, err = regexp.MatchString(`.+\.(ts|js|tsx|jsx|mjs|cjs|mts|json|css|sass|scss|png|svg|jpg|gql)$`, relPath)
+			matched, err = regexp.MatchString(`.+\.(php|ts|js|tsx|jsx|mjs|cjs|mts|json|css|sass|scss|png|svg|jpg|gql)$`, relPath)
 			if !matched || err != nil {
 				return nil
 			}
