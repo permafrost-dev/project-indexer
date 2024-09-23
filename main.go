@@ -20,6 +20,8 @@ var opts struct {
 
 	Ignored []string `short:"i" long:"ignore" description:"Ignore files matching the given pattern" required:"no"`
 
+	OneLine bool `short:"1" long:"one-line" description:"Show only the changed files as a space-separated list"`
+
 	Args struct {
 		Paths []string
 	} `positional-args:"yes" required:"yes"`
@@ -205,11 +207,79 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Println("No changes detected.")
+	case "list-changes":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: project-indexer list-changes <directory>")
+			os.Exit(1)
+		}
+		result := NewChangedFiles()
+
+		currentFullIndex := make(map[string]string)
+		storedFullIndex := make(map[string]string)
+
+		for _, path := range opts.Args.Paths {
+			currentIndex, storedIndex, err := checkDirectory(opts.Filename, path)
+			if err != nil {
+				fmt.Println("Error checking directory:", err)
+				os.Exit(1)
+			}
+
+			for path, currentHash := range currentIndex {
+				currentFullIndex[path] = currentHash
+			}
+
+			storedFullIndex = storedIndex
+		}
+
+		for path, currentHash := range currentFullIndex {
+			if storedHash, ok := storedFullIndex[path]; ok {
+				if currentHash != storedHash {
+					result.Modified = append(result.Modified, path)
+				}
+			} else {
+				result.Added = append(result.Added, path)
+			}
+		}
+
+		for path, _ := range storedFullIndex {
+			if _, ok := currentFullIndex[path]; !ok {
+				result.Removed = append(result.Removed, path)
+			}
+		}
+
+		printFn := func(a []string) {
+			lastIdx := len(a) - 1
+			eol := "\n"
+
+			if opts.OneLine {
+				eol = " "
+			}
+
+			for idx, v := range a {
+				if idx == lastIdx {
+					fmt.Printf("%s\n", v)
+				} else {
+					fmt.Printf("%s%s", v, eol)
+				}
+			}
+		}
+
+		combined := make([]string, 0)
+		combined = append(combined, result.Added...)
+		combined = append(combined, result.Modified...)
+
+		if len(combined) == 0 {
+			fmt.Println("No changes detected.")
+		}
+
+		if len(combined) > 0 {
+			printFn(combined)
+		}
+
 		os.Exit(0)
 	default:
 		fmt.Println("Unknown command:", cmd)
-		fmt.Println("Usage: project-indexer [index|check] <directory>")
+		fmt.Println("Usage: project-indexer [index|check|list-changes] <directory>")
 		os.Exit(1)
 	}
 }
@@ -312,15 +382,16 @@ func checkDirectory(indexFilePath string, dir string) (map[string]string, map[st
 	projectDir := FindProjectRoot(dir)
 	f, err := os.Open(indexFilePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not open index file: %v", err)
+		return nil, nil, fmt.Errorf("could not open index file '%s': %v", indexFilePath, err)
 	}
+	f.Seek(0, 0)
 	defer f.Close()
 
-	var storedIndex map[string]string
+	var storedIndex = make(map[string]string)
 	decoder := json.NewDecoder(f)
 	err = decoder.Decode(&storedIndex)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not decode index file: %v", err)
+		return nil, nil, fmt.Errorf("could not decode index file '%s': %v", indexFilePath, err)
 	}
 
 	currentIndex := make(map[string]string)
